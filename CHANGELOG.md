@@ -14,7 +14,7 @@
 
 ---
 
-### ✅ 2. **Installed Cloudsmith CLI and Enabled OIDC Authentication**
+### ✅ 2 -3. **Installed Cloudsmith CLI and Enabled OIDC Authentication**
 
 * **Files:** `release_package.yml`, `promote_package.yml`
 * **Change:**
@@ -29,12 +29,12 @@
       oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
       oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
   ```
-* **Reason:** Cloudsmith CLI was not available and OIDC is preferred over hardcoded API keys.
+* **Reason:** OIDC is preferred over hardcoded API keys.
 * **Impact:** Secure, token-based publishing without manual secrets.
 
 ---
 
-### ✅ 3. **Corrected Repository Environment Variables in Promote Workflow**
+### ✅ 4–5. **Corrected Repository Environment Variables in Promote Workflow**
 
 * **File:** `.github/workflows/promote_package.yml`
 * **Fix:**
@@ -47,43 +47,15 @@
 
 ---
 
-### ✅ 4. **Improved Artifact Upload/Download Configuration**
+### ✅ 6. **Configured Package Metadata in `pyproject.toml`**
 
-* **Files:** `build_package.yml`, `release_package.yml`
-* **Fix:**
-
-  * Removed redundant `repository` and `github-token` in artifact download
-  * Used standard names and paths:
-
-    ```yaml
-    - name: Download artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package
-        path: dist
-        run-id: ${{ github.event.workflow_run.id }}
-    ```
-* **Impact:** Clean integration between build and release workflows.
-
----
-
-### ✅ 5. **Added `.whl` Support in Cloudsmith Upload**
-
-* **File:** `release_package.yml`
+* **File:** `pyproject.toml`
 * **Change:**
 
-  ```bash
-  cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.whl dist/*.tar.gz --republish
+  ```toml
+  [project]
+  name = "example-package"
+  version = "0.0.1"
   ```
-* **Reason:** Only `.tar.gz` was uploaded originally, but `.whl` is the preferred install format for many users.
-* **Impact:** Ensures both formats are available to downstream consumers.
-
----
-
-### ✅ 6. **Updated `example.py` with Package Parameters**
-
-* **File:** `example.py`
-* **Change:**
-  `# Included package parameters on line 6`
-  *(e.g., initialization or configuration added as part of packaging effort)*
-* **Impact:** Ensures proper metadata or runtime config is set in the sample code, aligning with the distribution package.
+* **Reason:** Required fields for PEP 621-compliant builds and to uniquely identify the package.
+* **Impact:** Enables successful packaging, versioning, and distribution to Cloudsmith.
