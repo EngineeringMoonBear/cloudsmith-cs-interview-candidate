@@ -70,6 +70,10 @@ jobs:
           echo "Setting Cloudsmith API key as environment variable..."
           echo "CLOUDSMITH_API_KEY=$token" >> $GITHUB_ENV
 
+      - name: Install Cloudsmith CLI 
+        run: |
+          pip install --upgrade cloudsmith-cli
+
       - name: Push package to Cloudsmith
         run: |
           if ! ls dist/*.tar.gz 1> /dev/null 2>&1 && ! ls dist/*.whl 1> /dev/null 2>&1; then
