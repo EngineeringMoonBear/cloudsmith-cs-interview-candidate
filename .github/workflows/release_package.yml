@@ -12,13 +12,15 @@ env:
   CLOUDSMITH_SERVICE_SLUG: ${{ secrets.CLOUDSMITH_SERVICE_SLUG }}
 
 permissions:
-  id-token: write        # ✅ Required to generate the OIDC token
+  id-token: write       
   contents: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Set up GitHub CLI
