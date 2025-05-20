@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   CLOUDSMITH_NAMESPACE: josh
   CLOUDSMITH_REPOSITORY: cloudsmith-support-assessment
   CLOUDSMITH_SERVICE_SLUG: ${{ secrets.CLOUDSMITH_SERVICE_SLUG }}
