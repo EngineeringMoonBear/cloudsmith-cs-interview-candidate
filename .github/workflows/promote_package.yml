@@ -1,12 +1,8 @@
 name: Promote Python Package
 
 on:
-  workflow_dispatch:
-    inputs:
-      package_version:
-        description: 'Package version to promote (e.g., 0.0.1)'
-        required: true
-        type: string
+  repository_dispatch:
+    types: [cloudsmith.package.synchronized]
 
 env:
   CLOUDSMITH_NAMESPACE: ${{ secrets.CLOUDSMITH_NAMESPACE }}
@@ -30,27 +26,37 @@ jobs:
           oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
           oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
 
-      - name: Get package identifier and promote
+      - name: Tag synced package as ready-for-production
         run: |
-          PACKAGE_FILE="${PACKAGE_NAME}-${{ github.event.inputs.package_version }}.tar.gz"
-          echo "Looking for: $PACKAGE_FILE"
+          PACKAGE_NAME=$(echo "${{ github.event.client_payload.package_name }}")
+          PACKAGE_VERSION=$(echo "${{ github.event.client_payload.package_version }}")
+          echo "📦 Tagging $PACKAGE_NAME@$PACKAGE_VERSION with 'ready-for-production'"
 
-          PACKAGE_DATA=$(cloudsmith list package ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} \
-            -q "filename:$PACKAGE_FILE" -F json)
+          cloudsmith tags add "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}/${PACKAGE_NAME}@${PACKAGE_VERSION}" ready-for-production
 
-          IDENTIFIER=$(echo "$PACKAGE_DATA" | jq -r '.data[0].identifier_perm')
+      - name: Promote tagged packages to production
+        run: |
+          echo "🔍 Fetching packages tagged with 'ready-for-production'"
 
-          if [ -z "$IDENTIFIER" ] || [ "$IDENTIFIER" = "null" ]; then
-            echo "❌ Failed to find package with filename: $PACKAGE_FILE"
-            echo "Full Cloudsmith response:"
-            echo "$PACKAGE_DATA"
+          PACKAGE_QUERY="tag:ready-for-production"
+          PACKAGE_LIST=$(cloudsmith list package "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}" -q "$PACKAGE_QUERY" -F json)
+
+          COUNT=$(echo "$PACKAGE_LIST" | jq '.data | length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No packages found with tag: ready-for-production"
             exit 1
           fi
 
-          echo "✅ Found package identifier: $IDENTIFIER"
+          for row in $(echo "$PACKAGE_LIST" | jq -r '.data[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
 
-          echo "Promoting to production..."
-          cloudsmith mv --yes \
-            ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }}/$IDENTIFIER \
-            ${{ env.CLOUDSMITH_PRODUCTION_REPO }}
-        shell: bash
+            IDENTIFIER=$(_jq '.identifier_perm')
+            NAME=$(_jq '.package')
+
+            echo "🚚 Promoting $NAME ($IDENTIFIER)"
+            cloudsmith mv --yes \
+              "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}/$IDENTIFIER" \
+              "${CLOUDSMITH_PRODUCTION_REPO}"
+          done

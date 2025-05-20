@@ -59,3 +59,100 @@
   ```
 * **Reason:** Required fields for PEP 621-compliant builds and to uniquely identify the package.
 * **Impact:** Enables successful packaging, versioning, and distribution to Cloudsmith.
+
+# ✅ `promote_package.yml` Changes Summary
+
+## 🎯 Goal
+
+Update the GitHub Actions workflow to:
+
+1. **Remove manual trigger**
+2. **Use a webhook from Cloudsmith staging repo to trigger the workflow**
+3. **Tag the synchronized package with `ready-for-production`**
+4. **Query packages tagged with `ready-for-production`**
+5. **Promote those packages from staging to production**
+
+---
+
+## 🔄 1. Remove Manual Trigger
+
+### ❌ Removed
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version to promote (e.g., 0.0.1)'
+        required: true
+        type: string
+```
+
+---
+
+## 🪝 2. Add Webhook Trigger
+
+### ✅ Added
+
+```yaml
+on:
+  repository_dispatch:
+    types: [cloudsmith.package.synchronized]
+```
+
+> **Note:** This requires configuring a webhook in Cloudsmith to trigger the GitHub workflow after package synchronization.
+
+---
+
+## 🏷️ 3. Tag Package with `ready-for-production`
+
+### ✅ Added
+
+```yaml
+- name: Tag synced package as ready-for-production
+  run: |
+    PACKAGE_NAME=$(echo "${{ github.event.client_payload.package_name }}")
+    PACKAGE_VERSION=$(echo "${{ github.event.client_payload.package_version }}")
+    echo "📦 Tagging $PACKAGE_NAME@$PACKAGE_VERSION with 'ready-for-production'"
+
+    cloudsmith tags add "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}/${PACKAGE_NAME}@${PACKAGE_VERSION}" ready-for-production
+```
+
+> This uses `client_payload` from the webhook to identify and tag the package.
+
+---
+
+## 🔍 4. Query All Packages Tagged `ready-for-production`
+
+### ✅ Added
+
+```yaml
+PACKAGE_QUERY="tag:ready-for-production"
+PACKAGE_LIST=$(cloudsmith list package "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}" -q "$PACKAGE_QUERY" -F json)
+```
+
+> Filters only those packages marked as ready for promotion.
+
+---
+
+## 🚚 5. Promote All Tagged Packages
+
+### ✅ Added
+
+```yaml
+for row in $(echo "$PACKAGE_LIST" | jq -r '.data[] | @base64'); do
+  _jq() {
+    echo ${row} | base64 --decode | jq -r ${1}
+  }
+
+  IDENTIFIER=$(_jq '.identifier_perm')
+  NAME=$(_jq '.package')
+
+  echo "🚚 Promoting $NAME ($IDENTIFIER)"
+  cloudsmith mv --yes \
+    "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_STAGING_REPO}/$IDENTIFIER" \
+    "${CLOUDSMITH_PRODUCTION_REPO}"
+done
+```
+
+> Loops through each tagged package and promotes it from staging to production.
