@@ -77,9 +77,16 @@ jobs:
       - name: Push package to Cloudsmith
         run: |
           if ! ls dist/*.tar.gz 1> /dev/null 2>&1 && ! ls dist/*.whl 1> /dev/null 2>&1; then
-            echo "❌ No package files to upload"
-            exit 1
+           echo "❌ No package files to upload"
+          exit 1
           fi
 
           echo "Pushing packages..."
-          cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.whl dist/*.tar.gz --republish
+          for file in dist/*.whl dist/*.tar.gz; do
+          echo "Pushing $file"
+          cloudsmith push python "${CLOUDSMITH_NAMESPACE}/${CLOUDSMITH_REPOSITORY}" "$file" --republish
+           done
+      
+        env:
+          CLOUDSMITH_NAMESPACE: ${{ secrets.CLOUDSMITH_NAMESPACE }}
+          CLOUDSMITH_REPOSITORY: staging
