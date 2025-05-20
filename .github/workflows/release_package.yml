@@ -7,13 +7,13 @@ on:
     branches: [main]
 
 env:
-  CLOUDSMITH_NAMESPACE: ${{ vars.CLOUDSMITH_NAMESPACE }}
+  CLOUDSMITH_NAMESPACE: ${{ secrets.CLOUDSMITH_NAMESPACE }}
   CLOUDSMITH_REPOSITORY: "staging"
-  CLOUDSMITH_SERVICE_SLUG: ${{ vars.CLOUDSMITH_SERVICE_SLUG }}
+  CLOUDSMITH_SERVICE_SLUG: ${{ secrets.CLOUDSMITH_SERVICE_SLUG }}
 
 permissions:
+  id-token: write        # ✅ Required to generate the OIDC token
   contents: read
-  actions: read
 
 jobs:
   publish:
@@ -21,27 +21,59 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package
-          path: dist
-          run-id: ${{ github.event.workflow_run.id }}
+      - name: Set up GitHub CLI
+        run: |
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install -y gh
+
+      - name: Check gh version
+        run: gh --version
+
+      - name: Download artifact from workflow run via GitHub API
+        run: |
+          echo "Finding the latest successful run..."
+          run_id=${{ github.event.workflow_run.id }}
+          artifact_id=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+            -q '.artifacts[] | select(.name == "python-package") | .id')
+
+          if [ -z "$artifact_id" ]; then
+            echo "❌ Artifact not found"
+            exit 1
+          fi
+
+          echo "Downloading artifact ID: $artifact_id..."
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/actions/artifacts/$artifact_id/zip \
+            > artifact.zip
+          unzip artifact.zip -d dist/
 
       - name: List directory contents
         run: ls -la dist/
 
-      - name: Install Cloudsmith CLI
-        uses: cloudsmith-io/cloudsmith-cli-action@v1.0.1
-        with:
-          oidc-namespace: ${{ env.CLOUDSMITH_NAMESPACE }}
-          oidc-service-slug: ${{ env.CLOUDSMITH_SERVICE_SLUG }}
+      - name: Authenticate with Cloudsmith using OIDC
+        run: |
+          echo "Requesting GitHub OIDC token..."
+          id_token=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r '.value')
+
+          echo "Exchanging for Cloudsmith API token..."
+          token=$(curl -s -X POST -H "Content-Type: application/json" \
+            -d "{\"oidc_token\":\"$id_token\", \"service_slug\":\"${{ env.CLOUDSMITH_SERVICE_SLUG }}\"}" \
+            https://api.cloudsmith.io/openid/${{ env.CLOUDSMITH_NAMESPACE }}/ | jq -r '.token')
+
+          echo "Setting Cloudsmith API key as environment variable..."
+          echo "CLOUDSMITH_API_KEY=$token" >> $GITHUB_ENV
 
       - name: Push package to Cloudsmith
         run: |
           if ! ls dist/*.tar.gz 1> /dev/null 2>&1 && ! ls dist/*.whl 1> /dev/null 2>&1; then
-            echo "No package found to upload"
+            echo "❌ No package files to upload"
             exit 1
           fi
+
+          echo "Pushing packages..."
           cloudsmith push python ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_REPOSITORY }} dist/*.whl dist/*.tar.gz --republish
-        shell: bash

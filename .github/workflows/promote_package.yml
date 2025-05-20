@@ -9,14 +9,15 @@ on:
         type: string
 
 env:
-  CLOUDSMITH_NAMESPACE: ${{ vars.CLOUDSMITH_NAMESPACE }}
-  CLOUDSMITH_STAGING_REPO: 'staging' # NOTE: fixed -- was incorrectly 'production'
-  CLOUDSMITH_PRODUCTION_REPO: 'production' # Note: fixed -- was incorrectly 'staging'
-  CLOUDSMITH_SERVICE_SLUG: ${{ vars.CLOUDSMITH_SERVICE_SLUG }}
+  CLOUDSMITH_NAMESPACE: ${{ secrets.CLOUDSMITH_NAMESPACE }}
+  CLOUDSMITH_SERVICE_SLUG: ${{ secrets.CLOUDSMITH_SERVICE_SLUG }}
+  CLOUDSMITH_STAGING_REPO: 'staging'
+  CLOUDSMITH_PRODUCTION_REPO: 'production'
   PACKAGE_NAME: 'example_package'
 
 permissions:
   id-token: write
+  contents: read
 
 jobs:
   promote:
@@ -31,23 +32,24 @@ jobs:
 
       - name: Get package identifier and promote
         run: |
-          # Query for the package and get its identifier
-          PACKAGE_QUERY="filename:${PACKAGE_NAME}-${{ github.event.inputs.package_version }}.tar.gz"
-          echo "Searching for package with query: $PACKAGE_QUERY"
-          
-          PACKAGE_DATA=$(cloudsmith list package ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} -q "$PACKAGE_QUERY" -F json)
-          
-          # Extract the identifier_perm using jq
+          PACKAGE_FILE="${PACKAGE_NAME}-${{ github.event.inputs.package_version }}.tar.gz"
+          echo "Looking for: $PACKAGE_FILE"
+
+          PACKAGE_DATA=$(cloudsmith list package ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }} \
+            -q "filename:$PACKAGE_FILE" -F json)
+
           IDENTIFIER=$(echo "$PACKAGE_DATA" | jq -r '.data[0].identifier_perm')
-          
+
           if [ -z "$IDENTIFIER" ] || [ "$IDENTIFIER" = "null" ]; then
-            echo "Failed to find package identifier"
+            echo "❌ Failed to find package with filename: $PACKAGE_FILE"
+            echo "Full Cloudsmith response:"
+            echo "$PACKAGE_DATA"
             exit 1
           fi
-          
-          echo "Found package identifier: $IDENTIFIER"
-          
-          # Promote package using the identifier
+
+          echo "✅ Found package identifier: $IDENTIFIER"
+
+          echo "Promoting to production..."
           cloudsmith mv --yes \
             ${{ env.CLOUDSMITH_NAMESPACE }}/${{ env.CLOUDSMITH_STAGING_REPO }}/$IDENTIFIER \
             ${{ env.CLOUDSMITH_PRODUCTION_REPO }}
